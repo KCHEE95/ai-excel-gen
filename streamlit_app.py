@@ -1,37 +1,36 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from datetime import datetime
+import io
+import xlsxwriter
 
-st.set_page_config(layout="wide")
-st.title("🏭 Epicor 生产实时仪表盘")
+st.title("📊 Epicor 订单报表生成器")
 
-# 1. 加载并清洗数据
-uploaded_file = st.file_uploader("上传 Epicor 导出的 CSV", type=["csv"])
+uploaded_file = st.file_uploader("上传 Epicor CSV 文件", type=["csv"])
+
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    today = pd.Timestamp("2026-07-07")
-    
-    # 定义 WIP 和 逾期
+    # 定义 WIP
     wip_df = df[~df['Current Operation'].isin(['Shipped', 'Completed'])]
-    overdue_df = wip_df[pd.to_datetime(wip_df['Exwork Date']) < today]
-
-    # 2. KPI 区域
-    col1, col2, col3 = st.columns(3)
-    col1.metric("在制品总数 (WIP)", len(wip_df))
-    col2.metric("逾期订单", len(overdue_df), delta_color="inverse")
-    col3.metric("总处理中 Job", len(df))
-
-    # 3. 可视化：工序瓶颈分布
-    st.subheader("📊 当前工序瓶颈分布")
-    op_counts = wip_df['Current Operation'].value_counts().reset_index()
-    fig = px.bar(op_counts, x='index', y='Current Operation', title="各工序待处理 Job 数量")
-    st.plotly_chart(fig, use_container_width=True)
-
-    # 4. 可视化：步骤完成率 (示例逻辑)
-    st.subheader("⚙️ 生产工艺流完成率")
-    # 简化版：统计每个 Step 列的非空值
-    steps = [f'Step {i}' for i in range(1, 21)]
-    step_data = wip_df[steps].count().reset_index()
-    fig2 = px.line(step_data, x='index', y=0, title="各步骤参与 Job 计数")
-    st.plotly_chart(fig2, use_container_width=True)
+    
+    if st.button("生成带 Dashboard 的 Excel"):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # 1. 保存明细表
+            wip_df.to_excel(writer, index=False, sheet_name='WIP_Data')
+            
+            # 2. 创建 Dashboard 工作表
+            dashboard = writer.book.add_worksheet('Dashboard')
+            
+            # 3. 统计数据准备
+            op_counts = wip_df['Current Operation'].value_counts()
+            
+            # 4. 在 Excel 里画图
+            chart = writer.book.add_chart({'type': 'column'})
+            chart.add_series({
+                'name':       '在制品数量',
+                'categories': ['WIP_Data', 1, 23, len(wip_df), 23], # 假设 Column X 是第 24 列
+                'values':     ['Dashboard', 1, 1, len(op_counts), 1],
+            })
+            dashboard.insert_chart('B2', chart)
+            
+        st.download_button("📥 下载带 Dashboard 的 Excel", data=output.getvalue(), file_name="Report_Dashboard.xlsx")
