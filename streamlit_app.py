@@ -1,37 +1,37 @@
 import streamlit as st
 import pandas as pd
-import google.generativeai as genai
-import io
+import plotly.express as px
+from datetime import datetime
 
-# 配置 API
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+st.set_page_config(layout="wide")
+st.title("🏭 Epicor 生产实时仪表盘")
 
-st.title("📊 Epicor Kinetic 订单智能仪表盘")
-
-# 1. 上传文件功能
-uploaded_file = st.file_uploader("请上传从 Epicor 导出的 Excel 文件", type=["xlsx", "xls"])
-
-if uploaded_file is not None:
-    # 读取 Excel
-    df = pd.read_excel(uploaded_file)
-    st.write("### 数据预览", df.head())
+# 1. 加载并清洗数据
+uploaded_file = st.file_uploader("上传 Epicor 导出的 CSV", type=["csv"])
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    today = pd.Timestamp("2026-07-07")
     
-    if st.button("开始分析并生成 Dashboard"):
-        with st.spinner('Gemini 正在深度分析订单数据...'):
-            # 将数据转为文本摘要（为了节省 Token，只发送前 20 行或特定列）
-            data_summary = df.head(50).to_string()
-            
-            model = genai.GenerativeModel('gemini-pro')
-            prompt = f"你是一个数据分析专家。这是从 Epicor Kinetic 导出的订单数据摘要：\n{data_summary}\n\n请为我生成一份详细的总结报告，包含：1. 销售趋势分析；2. 关键瓶颈提示；3. 改进建议。并给出可以直接用 Python/Streamlit 绘图的建议。"
-            
-            response = model.generate_content(prompt)
-            st.markdown("### 🤖 AI 分析报告")
-            st.write(response.text)
-            
-            # 2. 自动生成可视化仪表盘
-            st.subheader("📈 快速可视化图表")
-            # 假设你的 Excel 有 'OrderDate' 和 'OrderAmount' 列
-            try:
-                st.line_chart(df.set_index('OrderDate')['OrderAmount'])
-            except:
-                st.warning("未能自动绘图，请确保 Excel 中包含日期和金额列，或检查列名是否正确。")
+    # 定义 WIP 和 逾期
+    wip_df = df[~df['Current Operation'].isin(['Shipped', 'Completed'])]
+    overdue_df = wip_df[pd.to_datetime(wip_df['Exwork Date']) < today]
+
+    # 2. KPI 区域
+    col1, col2, col3 = st.columns(3)
+    col1.metric("在制品总数 (WIP)", len(wip_df))
+    col2.metric("逾期订单", len(overdue_df), delta_color="inverse")
+    col3.metric("总处理中 Job", len(df))
+
+    # 3. 可视化：工序瓶颈分布
+    st.subheader("📊 当前工序瓶颈分布")
+    op_counts = wip_df['Current Operation'].value_counts().reset_index()
+    fig = px.bar(op_counts, x='index', y='Current Operation', title="各工序待处理 Job 数量")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 4. 可视化：步骤完成率 (示例逻辑)
+    st.subheader("⚙️ 生产工艺流完成率")
+    # 简化版：统计每个 Step 列的非空值
+    steps = [f'Step {i}' for i in range(1, 21)]
+    step_data = wip_df[steps].count().reset_index()
+    fig2 = px.line(step_data, x='index', y=0, title="各步骤参与 Job 计数")
+    st.plotly_chart(fig2, use_container_width=True)
